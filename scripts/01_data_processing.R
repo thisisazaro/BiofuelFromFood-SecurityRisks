@@ -95,6 +95,82 @@ head(fsi_clean)
 
 
 
+# объёмы производства биоэтанола и биодизеля по странам (в миллионах литров), а значит:
+# Непосредственно отражают влияние биотоплива из продовольственного сырья
+# Позволяют построить переменные: Bioethanol_Production, Biodiesel_Production
+# Идеальны для регрессий влияния биотоплива на продовольственную безопасность
+# источник OECD-FAO Agricultural Outlook 2024-2033
+
+library(readxl)
+library(dplyr)
+library(tidyr)
+
+
+# Загрузка листа с Ethanol (лист 3)
+ethanol_raw <- read_excel("data/biofuel_oecd.xlsx", sheet = 3)
+str(ethanol_raw)
+# Загрузка листа с Biodiesel (лист 4)
+biodiesel_raw <- read_excel("data/biofuel_oecd.xlsx", sheet = 4)
+str(biodiesel_raw)
+
+library(stringr)
+
+ethanol_raw <- ethanol_raw %>%
+        rename(Country = `Time period`) %>%
+        mutate(Country = str_squish(str_remove_all(Country, "·")))  
+
+biodiesel_raw <- biodiesel_raw %>%
+        rename(Country = `Time period`) %>%
+        mutate(Country = str_squish(str_remove_all(Country, "·")))
+library(tidyr)
+library(dplyr)
+
+ethanol_long <- ethanol_raw %>%
+        pivot_longer(cols = -Country, names_to = "year", values_to = "Ethanol_Production") %>%
+        mutate(
+                year = as.integer(year),
+                Ethanol_Production = as.numeric(Ethanol_Production)
+        )
+str(ethanol_long)
+
+biodiesel_long <- biodiesel_raw %>%
+        pivot_longer(cols = -Country, names_to = "year", values_to = "Biodiesel_Production") %>%
+        mutate(
+                year = as.integer(year),
+                Biodiesel_Production = as.numeric(Biodiesel_Production)
+        )
+str(biodiesel_long)
+
+# Список агрегатов, которые можно исключить
+aggregates <- c("OECD", "European Union", "Total", "World")
+
+# Очистка ethanol
+ethanol_long_clean <- ethanol_long %>%
+        filter(!Country %in% aggregates) %>%
+        distinct(Country, year, .keep_all = TRUE)
+
+# Очистка biodiesel
+biodiesel_long_clean <- biodiesel_long %>%
+        filter(!Country %in% aggregates) %>%
+        distinct(Country, year, .keep_all = TRUE)
+
+
+biofuel_combined <- full_join(
+        ethanol_long_clean, 
+        biodiesel_long_clean, 
+        by = c("Country", "year")
+)
+
+biofuel_combined
+
+
+
+
+
+
+
+
+
 ## объединяем в финальный набор данных
 
 # Начинаем с GDP
@@ -119,6 +195,12 @@ full_data <- full_data %>%
         left_join(fsi_clean, by = c("Country", "year" = "Year"))
 
 
+# Добавляем Ethanol_Production и Biodiesel_Production
+
+full_data <- full_data %>%
+        left_join(biofuel_combined, by = c("Country", "year"))
+
+
 glimpse(full_data)
 head(full_data)
 summary(full_data)
@@ -126,6 +208,6 @@ summary(full_data)
 # сохраняем в excel
 write_xlsx(full_data, path = "data/full_data.xlsx")
 
-
+str(full_data)
 
 
