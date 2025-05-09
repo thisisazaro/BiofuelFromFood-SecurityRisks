@@ -6,6 +6,8 @@ library(dplyr)
 library(stringr)
 library(readr)
 library(writexl)
+library(readxl)
+library(tidyr)
 
 gdp <- WDI(country = "all", indicator = "NY.GDP.PCAP.CD", start = 2000, end = 2023)
 head(gdp)
@@ -101,9 +103,7 @@ head(fsi_clean)
 # Идеальны для регрессий влияния биотоплива на продовольственную безопасность
 # источник OECD-FAO Agricultural Outlook 2024-2033
 
-library(readxl)
-library(dplyr)
-library(tidyr)
+
 
 
 # Загрузка листа с Ethanol (лист 3)
@@ -113,7 +113,6 @@ str(ethanol_raw)
 biodiesel_raw <- read_excel("data/biofuel_oecd.xlsx", sheet = 4)
 str(biodiesel_raw)
 
-library(stringr)
 
 ethanol_raw <- ethanol_raw %>%
         rename(Country = `Time period`) %>%
@@ -122,8 +121,7 @@ ethanol_raw <- ethanol_raw %>%
 biodiesel_raw <- biodiesel_raw %>%
         rename(Country = `Time period`) %>%
         mutate(Country = str_squish(str_remove_all(Country, "·")))
-library(tidyr)
-library(dplyr)
+
 
 ethanol_long <- ethanol_raw %>%
         pivot_longer(cols = -Country, names_to = "year", values_to = "Ethanol_Production") %>%
@@ -164,10 +162,64 @@ biofuel_combined <- full_join(
 biofuel_combined
 
 
+## добавление дополнительных переменных
+
+| Категория                           | Переменная WDI                                              | Назначение                                          |
+| ----------------------------------- | ----------------------------------------------------------- | --------------------------------------------------- |
+| 📉 Цены на продовольствие           | `FP.CPI.TOTL.ZG` – Food price inflation (annual %)          | Учет инфляционного давления                         |
+| 📈 Общее потребление энергии        | `EG.USE.PCAP.KG.OE` – Energy use (kg oil eq./capita)        | Контекст спроса на топливо                          |
+| 🚜 Использование пахотных земель    | `AG.LND.ARBL.ZS` – Arable land (% of land area)             | Земельные ресурсы для продовольствия vs. биотопливо |
+| 🛢️ Цена нефти как альтернатива     | внешняя переменная: Brent crude oil price                   | Экономическая мотивация к биоэнергии                |
+| 🌍 Население                        | `SP.POP.TOTL` – Total population                            | Масштаб спроса                                      |
+| 🏭 Индустриализация                 | `NV.IND.TOTL.ZS` – Industry (including construction), % GDP | Развитие биоэкономики                               |
+| 📊 Индекс политической стабильности | World Governance Indicators (WGI), e.g., `PV.EST`           | Надёжность агрополитики                             |
+        
+
+
+extra_indicators <- c(
+        "FP.CPI.TOTL.ZG",      # Food price inflation (%)
+        "EG.USE.PCAP.KG.OE",   # Energy use per capita (kg oil equivalent)
+        "AG.LND.ARBL.ZS",      # Arable land (% of land)
+        "SP.POP.TOTL",         # Total population
+        "NV.IND.TOTL.ZS"       # Industry share in GDP
+)
+
+extra_data <- WDI(
+        country = "all",
+        indicator = extra_indicators,
+        start = 2000,
+        end = 2023
+)
+
+extra_clean <- extra_data %>%
+        inner_join(wb_countries, by = "iso2c") %>%
+        rename(
+                Food_Inflation = FP.CPI.TOTL.ZG,
+                Energy_per_Capita = EG.USE.PCAP.KG.OE,
+                Arable_Land_Pct = AG.LND.ARBL.ZS,
+                Population_Total = SP.POP.TOTL,
+                Industry_GDP_Share = NV.IND.TOTL.ZS
+        )
+
+extra_clean
 
 
 
+## длина жд дорог
 
+rail_lines_data <- read_excel("data/rail_lines_density.xlsx", sheet =1)
+str(rail_lines_data)
+
+rail_long <- rail_lines_data %>%
+        pivot_longer(cols = matches("^20\\d{2}"), 
+                     names_to = "year",
+                     values_to = "rail_km") %>%
+        mutate(year = as.numeric(year))
+
+rail_clean <- rail_long %>%
+        filter(!grepl("Africa|World|Europe|Asia|Middle East|income", 
+                      `Country Name`, ignore.case = TRUE)) %>%
+        select(Country = `Country Name`, iso3c = `Country Code`, year, rail_km)
 
 
 
@@ -200,6 +252,14 @@ full_data <- full_data %>%
 full_data <- full_data %>%
         left_join(biofuel_combined, by = c("Country", "year"))
 
+# присоединяем extra_clean к full_data
+full_data <- full_data %>%
+        left_join(extra_clean, by = c("Country", "year"))
+
+
+# присоединяем длину жд дорог к full_data
+full_data <- full_data %>%
+        left_join(rail_clean, by = c("iso3c", "year"))
 
 glimpse(full_data)
 head(full_data)
